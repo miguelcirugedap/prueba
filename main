@@ -1,5 +1,169 @@
-import matplot.pyplot.lib as plt
+import pandas as pd
+from google.colab import drive
+import re
+import spacy
+import en_core_web_sm
+from spacy.matcher import Matcher
+import csv
+import time
 
-a = [1,2,3,4]
+def preproc(lst_check, bas):
+    
+    ''' 
+    Dada una lista de check y una base de datos inserta nueva línea a continuación del check.
+        Parámetros:
+            - lst_check(list) = lista de check.
+            - bas(str) = base de datos
+        
+        Return:
+            - bas(str) = base de datos
+    '''
+    bas = bas.replace('\n','')  # Quitamos los saltos de línea
+    
+    for i in lst_check:
+        
+        # Insertamos nueva línea según condición
+        # Introducimos espacio para diferenciar en el nlp
+        bas = bas.replace(str(i),'  ' + str(i) + '\n') 
+        
+    bas = re.sub('[-*,():.]','',bas)   # Quitamos caractéres especiales
 
-print(a)
+    return bas
+    
+def matcher(pattern, doc):
+  '''
+  A través de un diccionario y un documento convertido por procesamiento natural
+  del lenguaje. Devolver las coincidencias entre el diccionario y el documento.
+      Parámetros:
+        - pattern(dict): diccionario con palabras a valorar
+        - doc(nlp): documento en nlp
+      Return:
+        - matches(lst): Coincidencias encontradas 
+    '''
+  matcher = Matcher(nlp.vocab)  # Crear vocab npl
+  matcher.add(" ", [pattern])    
+  matches = matcher(doc)       # Buscar coincidencias
+  return matches 
+
+file = open('/content/drive/MyDrive/HUM/muestra_ejemplos_APA_02_03_23.txt', 'r')
+next(file) #eliminamos cabecera
+data = file.read() #string
+
+
+data = data.replace('|S|S','|s|S')  # Remplazamos para evitar confusiones
+data = data.replace('||S','|0|S')  # Remplazamos para evitar confusiones
+lst_check = ['||','|s|S','|S|','|0|S']        # Definimos lista check
+data_cl = preproc(lst_check, data).splitlines()    # Preprocesamos
+
+# Diccionario analizar checks
+pattern1 = [{"TEXT": "s"}] 
+# Diccionario de palabras clave
+pattern2 = [{"TEXT": "carcinoma", "OP": "*"}, {"TEXT":"adenocarcinoma", "OP": "*"}, {"TEXT":"melanoma", "OP": "*"}, 
+            {"TEXT":"linfoma", "OP": "*"}, {"TEXT":"tumor", 'IS_ASCII': True, 'OP': '*', "TEXT": "neuroendocrino"}, 
+            {"TEXT":"positivo", "OP": "*"}, {"TEXT":"carcinoide", "OP": "*"}, {"TEXT":"neoplasia", "OP": "*"}, 
+            {"TEXT":"mielodisplásico", "OP": "*"}, {"TEXT":"mieloproliferativo", "OP": "*"},
+            {"TEXT":"mieloma", "OP": "*"}, {"TEXT":"sarcoma", "OP": "*"}, 
+            {"TEXT":"micosis", 'IS_ASCII': True, 'OP': '*', "TEXT": "fungoide"}, 
+            {"TEXT":"angiosarcoma", "OP": "*"}, {"TEXT":"liposarcoma", "OP": "*"}, 
+            {"TEXT":"leucemia", "OP": "*"}, {"TEXT":"cistoadenocarcinoma", "OP": "*"}, 
+            {"TEXT":"colangiocarcinoma", "OP": "*"}]
+
+# Dicionario de palabras excepción 
+pattern3 = [{"TEXT": "carcinoma", 'IS_ASCII': True, 'OP': '*', "TEXT": "basocelular"}]
+
+inicio=time.time()  # Definimos el inicio del tiempo
+
+lst = []  # Definimos lista vacía
+lst_alarma = [[1,1,1],[0,1,1],[0,0,1]] # Definimos lista de alarmas
+
+nlp = spacy.load('en_core_web_sm') # Definimos el procesamiento del lenguaje natural
+
+for line in data_cl: # Para cada línea
+  # Lista check plantilla [id, tumor, conservar, palabra, alarma]
+  check = [0,0,0,0,0] 
+
+  id = line.split("|") # Separacion de la lst para obtener los elementos
+  check[0] = id[0]    # Id paciente
+
+  palabra = id[1].lower() # Diagnóstico
+  palabra_doc = nlp(palabra)    # Realizamos el nlp
+
+  tumor = id[2].lower()   # Check Malignidad
+  tumor_doc = nlp(tumor)  # Realizamos el nlp
+
+  conservar = id[3].lower()  # Check Conservar
+  conservar_doc = nlp(conservar) # Realizamos el nlp
+  
+  matches1 = matcher(pattern1, tumor_doc) # Ver si existen checks
+  matches2 = matcher(pattern1, conservar_doc)
+
+  matches3 = matcher(pattern2, palabra_doc) # Ver si existe palabra clave
+  matches4 = matcher(pattern3, palabra_doc) # Ver si existe palabras excepcción
+ 
+  if len(matches1) >=1: # Si existe check tumor sobreescribir 
+    check[1] = 1
+
+  if len(matches2) >=1: # Si existe check conservar sobreescribir
+    check[2] = 1
+    
+  if (len(matches3) >=1) and (len(matches4) ==0) : # Si existe palabra clave sobreescribir 
+    check[3] = 1
+  
+  if check[1:4] in lst_alarma: # Si cumple alarma 
+    check[4] = 1
+
+  lst.append(check) # Añadir a la lista
+
+final = time.time() # Tiempo final
+print('Tiempo total de ejecución =', final-inicio, 's')
+
+# Crear dataframe
+tabla = pd.DataFrame(lst,
+                  columns=['encriptado','tumor', 'conservar', 'palabra', 'alerta'])
+tabla.style
+
+
+# Crear información de id + alerta
+# Se leerá para enviar la alerta
+alerta = tabla[['encriptado','alerta']]
+# Pasar a txt
+alerta.to_csv('alerta.txt', sep="|", 
+          quoting=csv.QUOTE_NONE, escapechar=" ", index=False)
+
+alarma_nlp = list(zip(*lst))[4]  # Alarmas generadas
+values_alarma_nlp = alarma_nlp.count(1)
+print('Alarmas generadas gracias a la total implementación =',values_alarma_nlp)
+alarma_conservar = list(zip(*lst))[2] # Activación conservar
+values_alarma_conservar = alarma_conservar.count(1)
+print('Alarmas generadas solo por conservar =',values_alarma_conservar)
+check_tumor = list(zip(*lst))[1]  # Activaión check tumor 
+values_check_tumor = check_tumor.count(1)
+print('Check tumor encontrados =',values_check_tumor)
+palabras_clave = list(zip(*lst))[3] # Activación palabras clave
+values_palabras_clave = palabras_clave.count(1)
+print('Palabras clave encontradas =',values_palabras_clave)
+
+# Curva ROC y Área Bajo la Curva (AUC)
+
+# Importamos paquetes
+from sklearn import metrics
+import matplotlib.pyplot as plt
+
+true = [0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1,0,1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1,0,0,0,1,0,0,0,0,0,0,0,1,0,0,0,0,0,0,0,0,0,1,0]
+alerta = tabla["alerta"]
+
+# Generamos la curva ROC
+fpr, tpr, threshold = metrics.roc_curve(true, alerta, pos_label=1)
+roc_auc = metrics.auc(fpr, tpr)
+
+# Graficamos
+plt.title('Curva ROC (Receiver Operating Characteristic)')
+plt.plot(fpr, tpr, 'b', label = 'ROC')
+plt.plot([], [], ' ', label='AUC = %0.2f' % roc_auc)
+plt.legend(loc = 'lower right')
+plt.plot([0, 1], [0, 1],'r--')
+plt.xlim([0, 1])
+plt.ylim([0, 1.1])
+plt.ylabel('Tasa de Verdaderos Positivos')
+plt.xlabel('Tasa de Falsos Positivos')
+plt.show()
